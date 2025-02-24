@@ -44,8 +44,8 @@ def build_tfidf_matrix(dataset, column):
 
 # Ingredient-based recommendation
 def recommend_by_ingredients(user_ingredients, tfidf_matrix, dataset, vectorizer, top_n=5, exclude_ingredients=None):
-    """Recommend recipes based on user-entered ingredients, with optional filtering before selecting top recipes."""
-    
+    """Recommend recipes based on user-entered ingredients, with similarity scores."""
+
     if not user_ingredients.strip():
         st.warning("⚠️ No ingredients entered! Please try again.")
         return None
@@ -60,37 +60,52 @@ def recommend_by_ingredients(user_ingredients, tfidf_matrix, dataset, vectorizer
                                                 .str.lower()
                                                 .str.contains('|'.join(exclude_ingredients), case=False, na=False)]
 
-    # Check if we have recipes left after filtering
     if filtered_dataset.empty:
         st.warning("⚠️ No recipes found after applying exclusion filters.")
         return None
 
     # Compute TF-IDF matrix for the filtered dataset
     filtered_tfidf_matrix = vectorizer.transform(filtered_dataset['ingredients_combined'])
-    
+
     # Compute similarity between user ingredients and filtered dataset
     user_tfidf = vectorizer.transform([user_ingredients])
     cosine_similarities = cosine_similarity(user_tfidf, filtered_tfidf_matrix).flatten()
-    
+
     # Select top N recommended recipes
-    recommendations = cosine_similarities.argsort()[-top_n:][::-1]
-    
-    return filtered_dataset.iloc[recommendations][['name', 'cuisine']] if not filtered_dataset.iloc[recommendations].empty else None
-    
+    recommendations_indices = cosine_similarities.argsort()[-top_n:][::-1]
+    recommended_recipes = filtered_dataset.iloc[recommendations_indices]
+
+    # Add similarity scores
+    recommended_recipes = recommended_recipes[['name', 'cuisine']].copy()
+    recommended_recipes['similarity_score'] = cosine_similarities[recommendations_indices]
+    recommended_recipes['similarity_score'] = recommended_recipes['similarity_score'].round(2)  # Round scores
+
+    return recommended_recipes
+
+
 # Recipe-based recommendation
 def recommend_by_recipe(recipe_name, tfidf_matrix, dataset, top_n=5):
-    """Recommend similar recipes based on a given recipe."""
+    """Recommend similar recipes based on a given recipe, with similarity scores."""
     recipe_index = dataset.index[dataset['name'].str.lower() == recipe_name.lower()]
-    
+
     if recipe_index.empty:
         st.warning("⚠️ Recipe not found in the dataset!")
         return None
 
     recipe_index = recipe_index[0]
     cosine_similarities = cosine_similarity(tfidf_matrix[recipe_index], tfidf_matrix).flatten()
-    similar_recipes = cosine_similarities.argsort()[-(top_n + 1):][::-1][1:]  # Exclude the recipe itself
 
-    return dataset.iloc[similar_recipes][['name', 'cuisine']]
+    # Select top N similar recipes (excluding the queried recipe itself)
+    similar_recipes_indices = cosine_similarities.argsort()[-(top_n + 1):][::-1][1:]
+    similar_recipes = dataset.iloc[similar_recipes_indices]
+
+    # Add similarity scores
+    similar_recipes = similar_recipes[['name', 'cuisine']].copy()
+    similar_recipes['similarity_score'] = cosine_similarities[similar_recipes_indices]
+    similar_recipes['similarity_score'] = similar_recipes['similarity_score'].round(2)  # Round scores
+
+    return similar_recipes
+
 
 # Ingredient frequency visualization
 def plot_ingredient_frequency(dataset):
